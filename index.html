@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Renders</title>
+<link rel="stylesheet" href="static/viewer.css">
+<style>
+:root { --bg:#f6f6f4; --fg:#1b1b1b; --muted:#6b6b6b; --line:#ddd; --panel:#fff; --chip:#ececea; --accent:#c4501b; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#111; --fg:#eee; --muted:#999; --line:#2a2a2a; --panel:#1a1a1a; --chip:#242424; --accent:#ff8a50; }
+}
+* { box-sizing:border-box; }
+html,body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.4 -apple-system, system-ui, sans-serif; }
+header { position:sticky; top:0; z-index:5; background:var(--bg); padding:calc(8px + env(safe-area-inset-top)) 12px 8px; border-bottom:1px solid var(--line); }
+.row { display:flex; gap:8px; align-items:center; }
+h1 { font-size:17px; margin:0; flex:1; }
+#count { color:var(--muted); font-size:13px; }
+input[type=search] { flex:1; min-width:0; font:inherit; padding:8px 10px; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--fg); }
+select.filter { flex:1; min-width:0; }
+select { font:inherit; padding:8px 6px; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--fg); }
+#folders { display:flex; gap:6px; overflow-x:auto; padding-top:8px; scrollbar-width:none; }
+#folders::-webkit-scrollbar { display:none; }
+.chip { flex:none; border:0; background:var(--chip); color:var(--fg); padding:6px 12px; border-radius:999px; font:inherit; font-size:13px; }
+.chip.on { background:var(--accent); color:#fff; }
+#grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(110px, 1fr)); gap:3px; padding:3px; }
+@media (min-width:700px) { #grid { grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:6px; padding:6px; } }
+.cell { position:relative; aspect-ratio:3/4; background:var(--chip); overflow:hidden; border-radius:4px; cursor:pointer; }
+.cell img { width:100%; height:100%; object-fit:contain; display:block; }
+.cell span { position:absolute; left:0; right:0; bottom:0; padding:14px 6px 4px; font-size:11px; color:#fff; background:linear-gradient(transparent, rgba(0,0,0,.7)); display:flex; gap:6px; white-space:nowrap; }
+.cell span i { font-style:normal; }
+.cell span .n { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.cell span .t { flex:none; opacity:.8; font-variant-numeric:tabular-nums; }
+#grid.fixed { grid-template-columns:repeat(var(--cols), minmax(0, 1fr)); }
+@keyframes arrive { from { opacity:0; transform:scale(.85); } }
+.cell.new { animation:arrive .45s cubic-bezier(.2,.7,.3,1); outline:2px solid var(--accent); outline-offset:-2px; }
+.cell.last { outline:3px solid var(--accent); outline-offset:-3px; }
+.cell.last img { opacity:.85; }
+.acts { position:absolute; top:4px; right:4px; display:flex; gap:4px; opacity:0; transition:opacity .15s; }
+.cell:hover .acts, .cell:focus-within .acts { opacity:1; }
+@media (hover:none) { .acts { opacity:1; } }
+.act { width:28px; height:28px; border:0; border-radius:999px; background:rgba(0,0,0,.55); color:#fff; font-size:14px; line-height:1;
+  display:grid; place-items:center; cursor:pointer; padding:0; }
+.act:hover { background:rgba(0,0,0,.8); }
+.act.del:hover { background:#c62828; }
+.act svg { width:15px; height:15px; }
+#crumbs { display:flex; gap:6px; flex-wrap:wrap; padding-top:8px; }
+#crumbs:empty { display:none; }
+/* group cards pack as masonry: each card's previews keep their own shape, so there is no empty space */
+#grid.cards { display:flex; align-items:flex-start; gap:3px; }
+@media (min-width:700px) { #grid.cards { gap:6px; } }
+#grid.cards > .gcol { flex:1; min-width:0; }
+.gcard { cursor:pointer; background:var(--chip); border-radius:6px; overflow:hidden; display:flex; flex-direction:column;
+  break-inside:avoid; margin-bottom:6px; }
+.gcard .mosaic { column-count:2; column-gap:1px; }
+.gcard .mosaic.n1 { column-count:1; }
+.gcard .mosaic img { width:100%; height:auto; display:block; margin-bottom:1px; break-inside:avoid; }
+.gcard b { font-size:12px; padding:5px 6px 0; overflow-wrap:anywhere; }
+.gcard small { font-size:11px; color:var(--muted); padding:0 6px 6px; }
+#sentinel { height:40px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="row"><button id="embed-close" class="chip" hidden aria-label="Close gallery">✕</button><h1>Renders</h1><span id="count"></span></div>
+  <div class="row" style="margin-top:8px"><input id="q" type="search" placeholder="Filter by file name">
+    <select id="by" aria-label="Group by"><option value="">No groups</option><option value="date">By date</option><option value="prefix">By name</option></select>
+    <select id="cols" aria-label="Images per row"><option value="auto">Auto</option></select></div>
+  <div class="row" style="margin-top:8px">
+    <select id="model" class="filter" aria-label="Model"></select>
+    <select id="lora" class="filter" aria-label="LoRA"></select>
+  </div>
+  <div id="folders"></div>
+  <div id="crumbs"></div>
+</header>
+<main id="grid"></main>
+<div id="sentinel"></div>
+
+<script src="static/viewer.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const state = { items: [], total: 0, folder: null, q: '', model: '', lora: '', by: '', group: null, cards: false, loading: null };
+const enc = encodeURIComponent;
+const fmtDate = t => new Date(t * 1000).toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const base = n => n.split('/').pop();
+const fmtShort = t => new Date(t * 1000).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+
+// filters shared by every request
+function params(extra = {}) {
+  const p = new URLSearchParams({ q: state.q, model: state.model, lora: state.lora, ...extra });
+  if (state.folder !== null) p.set('folder', state.folder);
+  if (state.by) p.set('by', state.by);
+  if (state.by && state.group !== null) p.set('group', state.group);
+  return p;
+}
+
+function load(reset, limit = 120) {
+  if (state.loading && !reset) return state.loading;
+  if (!reset && (state.cards || (state.total && state.items.length >= state.total))) return Promise.resolve();
+  if (reset) { state.items = []; state.total = 0; state.pending = []; state.cards = false; $('#grid').innerHTML = ''; $('#grid').classList.remove('cards'); renderCrumbs(); }
+  const p = params({ offset: state.items.length, limit, ...(reset && state.by && { groups: 1 }) });
+  const req = state.loading = fetch('api/images?' + p).then(r => r.json()).then(r => {
+    if (req !== state.loading) return;
+    state.total = r.total;
+    $('#count').textContent = r.total.toLocaleString() + ' images' + (r.indexing ? ` · reading ${r.indexing.toLocaleString()} more` : '');
+    if (reset) { renderFolders(r.dirs); renderFilters(r); }
+    if (reset && r.indexing) pollFilters();
+    if (reset && showCards(r)) return;
+    const frag = document.createDocumentFragment();
+    for (const it of r.items) {
+      state.items.push(it);
+      frag.appendChild(makeCell(it));
+    }
+    $('#grid').appendChild(frag);
+  }).finally(() => { if (state.loading === req) state.loading = null; });
+  return req;
+}
+
+function makeCell(it) {
+  const d = document.createElement('div');
+  d.className = 'cell';
+  d.innerHTML = `<img loading="lazy" decoding="async" src="thumb?path=${enc(it.path)}" alt=""><span><i class="n">${esc(base(it.path))}</i><i class="t">${fmtShort(it.mtime)}</i></span>
+    <div class="acts">${it.wf ? `<button class="act wf" title="Open workflow in ComfyUI" aria-label="Open workflow in ComfyUI">${WF_ICON}</button>` : ''}<button class="act del" title="Move to Trash" aria-label="Move to Trash">${TRASH_ICON}</button></div>`;
+  d.dataset.path = it.path;
+  d.onclick = e => {
+    if (e.target.closest('.wf')) return openWorkflow(it.path);
+    if (e.target.closest('.del')) return removeImage(d, it.path);
+    openViewer([...$('#grid').children].indexOf(d));
+  };
+  return d;
+}
+
+// New renders are fetched every few seconds but only put into the grid while you're at the top,
+// so nothing moves under the pointer further down. Further down, the header just counts them;
+// scrolling back up (or tapping that count) brings them in with a smooth slide.
+async function pollNew() {
+  try {
+    if (document.hidden || state.cards || state.loading || $('.cv.open') || !state.items.length) return;
+    const r = await (await fetch('api/images?' + params({ offset: 0, limit: 60 }))).json();
+    if (state.loading || state.cards) return;
+    const known = new Set([...state.items, ...(state.pending || [])].map(x => x.path));
+    const fresh = [];
+    for (const it of r.items) { if (known.has(it.path)) break; fresh.push(it); }
+    if (!fresh.length) return;
+    state.pending = [...fresh, ...(state.pending || [])];
+    state.total = r.total - state.pending.length;   // the grid's own count until they're shown
+    showCount();
+    insertPending();
+  } catch (e) {}
+}
+setInterval(pollNew, 5000);
+
+function showCount() {
+  const n = state.pending?.length || 0;
+  $('#count').innerHTML = `${(state.total + n).toLocaleString()} images` +
+    (n ? ` · <button id="newer" class="chip on" style="padding:2px 8px">↑ ${n} new</button>` : '');
+  if (n) $('#newer').onclick = () => scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function insertPending() {
+  const fresh = state.pending;
+  if (!fresh?.length || scrollY > 60 || $('.cv.open') || state.cards || state.loading) return;
+  state.pending = [];
+  const grid = $('#grid');
+  // FLIP: remember where the visible tiles are, insert, then animate them from there
+  const old = [...grid.children].slice(0, 60);
+  const before = old.map(c => c.getBoundingClientRect());
+  state.items.unshift(...fresh);
+  state.total += fresh.length;
+  const frag = document.createDocumentFragment();
+  for (const it of fresh) { const c = makeCell(it); c.classList.add('new'); frag.appendChild(c); }
+  grid.prepend(frag);
+  old.forEach((c, k) => {
+    const a = before[k], b = c.getBoundingClientRect();
+    if (a.top > innerHeight && b.top > innerHeight) return;
+    c.style.transition = 'none';
+    c.style.transform = `translate(${a.left - b.left}px, ${a.top - b.top}px)`;
+  });
+  grid.offsetWidth;  // apply the start positions before animating
+  old.forEach(c => {
+    if (!c.style.transform) return;
+    c.style.transition = 'transform .45s cubic-bezier(.2,.7,.3,1)';
+    c.style.transform = '';
+    c.addEventListener('transitionend', () => { c.style.transition = ''; }, { once: true });
+  });
+  showCount();
+  setTimeout(() => document.querySelectorAll('.cell.new').forEach(c => c.classList.remove('new')), 4000);
+}
+let st; addEventListener('scroll', () => { clearTimeout(st); st = setTimeout(insertPending, 150); }, { passive: true });
+
+// while the server is still reading models/LoRAs, refresh the dropdown counts without touching the grid
+function pollFilters() {
+  clearTimeout(state.poll);
+  state.poll = setTimeout(async () => {
+    const r = await (await fetch('api/images?' + params({ limit: 0 }))).json();
+    renderFilters(r);
+    $('#count').textContent = r.total.toLocaleString() + ' images' + (r.indexing ? ` · reading ${r.indexing.toLocaleString()} more` : '');
+    if (r.indexing) pollFilters();
+    else if (state.model || state.lora) load(true);
+  }, 4000);
+}
+
+function renderFilters(r) {
+  const fill = (sel, label, list, cur) => {
+    sel.innerHTML = '';
+    sel.add(new Option(label, ''));
+    for (const x of list) sel.add(new Option(`${x.name} (${x.count})`, x.name));
+    if (cur && !list.some(x => x.name === cur)) sel.add(new Option(`${cur} (0)`, cur));
+    sel.value = cur;
+  };
+  fill($('#model'), 'All models', r.models, state.model);
+  fill($('#lora'), 'All LoRAs', r.loras, state.lora);
+}
+$('#model').onchange = e => { state.model = e.target.value; saveUrl(); load(true); };
+$('#lora').onchange = e => { state.lora = e.target.value; saveUrl(); load(true); };
+
+const TRASH_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.1a1 1 0 0 0 1 .9h4.6a1 1 0 0 0 1-.9L12 4M6.8 6.5v5M9.2 6.5v5"/></svg>';
+const WF_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1" y="2" width="5" height="4" rx="1"/><rect x="10" y="10" width="5" height="4" rx="1"/><path d="M6 4h2.5a1.5 1.5 0 0 1 1.5 1.5v5"/></svg>';
+
+// Inside the ComfyUI sidebar the parent page loads it as a new workflow tab; standalone, open ComfyUI with it.
+function openWorkflow(path) {
+  if (window.parent !== window) window.parent.postMessage({ type: 'gallery-open-workflow', path }, '*');
+  else window.open(`${location.protocol}//${location.hostname}:8188/?gallery_wf=${enc(path)}`, '_blank');
+}
+
+async function removeImage(cell, path) {
+  if (!confirm(`Move ${base(path)} to the Trash?`)) return false;
+  const r = await fetch('api/delete?path=' + enc(path), { method: 'POST', headers: { 'X-Gallery': '1' } });
+  if (!r.ok) { alert('Could not delete: ' + r.status); return false; }
+  const i = state.items.findIndex(x => x.path === path);
+  if (i >= 0) state.items.splice(i, 1);
+  state.total--;
+  cell?.remove();
+  $('#count').textContent = state.total.toLocaleString() + ' images';
+  return true;
+}
+
+// ---------- groups ----------
+// Group cards replace the grid until you pick one. A big name group splits again by its next word.
+function showCards(r) {
+  const g = r.groups;
+  if (!g || state.leaf) return false;
+  const split = state.group === null || (state.by === 'prefix' && r.total > 60 && g.length > 1);
+  if (!split) return false;
+  state.cards = true;
+  $('#grid').classList.add('cards');
+  $('#count').textContent = `${r.total.toLocaleString()} images · ${g.length.toLocaleString()} groups`;
+  state.cardEls = [];
+  for (const x of g) {
+    const d = document.createElement('div');
+    d.className = 'gcard';
+    // inside a name group, drop the part every card shares ("Virtuosa_white" shows as "white")
+    const label = state.by === 'date' ? fmtDay(x.key)
+      : state.group && x.key.startsWith(state.group + '_') ? x.key.slice(state.group.length + 1) : x.key;
+    d.innerHTML = `<div class="mosaic n${x.covers.length}">${x.covers
+      .map(c => `<img loading="lazy" decoding="async" src="thumb?path=${enc(c.path)}" alt="" ${c.w ? `width="${c.w}" height="${c.h}"` : ''}>`).join('')}</div>
+      <b title="${esc(x.key)}">${esc(label)}</b><small>${x.count.toLocaleString()} images</small>`;
+    // the leftover group with no further word opens as a plain grid
+    d.onclick = () => { state.leaf = x.key === state.group; state.group = x.key; saveUrl(); load(true); };
+    state.cardEls.push(d);
+  }
+  layoutCards();
+  return true;
+}
+
+// Masonry that reads left to right, top to bottom: each card goes into whichever column is shortest.
+// Preview images carry their real width/height, so heights are known before they load.
+function layoutCards() {
+  if (!state.cards) return;
+  const grid = $('#grid'), v = cols.value;
+  const n = v !== 'auto' ? +v : Math.max(1, Math.floor(grid.clientWidth / (innerWidth >= 700 ? 200 : 110)));
+  grid.innerHTML = '';
+  const columns = Array.from({ length: n }, () => grid.appendChild(Object.assign(document.createElement('div'), { className: 'gcol' })));
+  for (const d of state.cardEls) {
+    columns.reduce((a, b) => (b.offsetHeight < a.offsetHeight ? b : a)).appendChild(d);
+  }
+}
+let lt; addEventListener('resize', () => { clearTimeout(lt); lt = setTimeout(layoutCards, 150); });
+
+const fmtDay = k => new Date(k + 'T12:00').toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+
+function renderCrumbs() {
+  const box = $('#crumbs');
+  box.innerHTML = '';
+  if (!state.by || state.group === null) return;
+  const add = (label, val, on) => {
+    const b = document.createElement('button');
+    b.className = 'chip' + (on ? ' on' : '');
+    b.textContent = label;
+    b.onclick = () => { state.group = val; state.leaf = false; saveUrl(); load(true); };
+    box.appendChild(b);
+  };
+  add('‹ All groups', null);
+  if (state.by === 'date') return add(fmtDay(state.group), state.group, true);
+  const t = state.group.split('_');
+  t.forEach((_, i) => add(t.slice(0, i + 1).join('_'), t.slice(0, i + 1).join('_'), i === t.length - 1));
+}
+
+$('#by').onchange = e => { state.by = e.target.value; state.group = null; state.leaf = false; saveUrl(); load(true); };
+
+function renderFolders(dirs) {
+  const box = $('#folders');
+  box.innerHTML = '';
+  const add = (label, val) => {
+    const b = document.createElement('button');
+    b.className = 'chip' + (state.folder === val ? ' on' : '');
+    b.textContent = label;
+    b.onclick = () => { state.folder = val; saveUrl(); load(true); };
+    box.appendChild(b);
+  };
+  add('All', null);
+  for (const d of dirs) add((d.name || 'top level') + ' · ' + d.count, d.name);
+}
+
+new IntersectionObserver(e => { if (e[0].isIntersecting) load(false); }, { rootMargin: '800px' }).observe($('#sentinel'));
+let qt; $('#q').oninput = e => { clearTimeout(qt); qt = setTimeout(() => { state.q = e.target.value; saveUrl(); load(true); }, 250); };
+
+async function item(i) {
+  while (i >= state.items.length && state.items.length < state.total) {
+    await load(false, Math.min(2000, i - state.items.length + 120));
+  }
+  const it = state.items[i];
+  const src = 'full?path=' + enc(it.path);
+  return { src, href: src, caption: base(it.path), details: (el, current) => details(el, it.path, current),
+    actions: [
+      ...(it.wf ? [{ html: WF_ICON, title: 'Open workflow in ComfyUI', onClick: () => openWorkflow(it.path) }] : []),
+      { html: TRASH_ICON, title: 'Move to Trash', onClick: async () => {
+        const cell = [...$('#grid').children].find(c => c.dataset.path === it.path);
+        if (await removeImage(cell, it.path)) CarouselViewer.refresh(state.total);
+      } },
+    ] };
+}
+
+function openViewer(i) {
+  CarouselViewer.open({
+    count: state.total, start: i, get: item,
+    onChange: i => saveUrl(state.items[i].path),
+    onClose: i => {
+      saveUrl();
+      // mark the image you were last looking at and bring it on screen
+      document.querySelector('.cell.last')?.classList.remove('last');
+      const cell = $('#grid').children[i];
+      if (cell) { cell.classList.add('last'); cell.scrollIntoView({ block: 'center' }); }
+    },
+  });
+}
+
+async function details(el, path, current) {
+  const m = await (await fetch('api/meta?path=' + enc(path))).json();
+  if (!current()) return;
+  const p = m.params || {};
+  const dur = s => s >= 60 ? `${Math.floor(s / 60)} min ${Math.round(s % 60)} s` : `${s} s`;
+  const top = [fmtDate(m.mtime), m.render_s != null && dur(m.render_s), m.width && `${m.width} × ${m.height}`].filter(Boolean).join(' · ');
+  const model = (m.models || []).map(n => base(n).replace(/\.(safetensors|gguf|ckpt|pt|pth|bin|sft)$/i, '')).join(', ');
+  const gen = [p.steps != null && `${p.steps} steps`, p.cfg != null && `CFG ${p.cfg}`, p.guidance != null && `guidance ${p.guidance}`,
+    p.denoise != null && `denoise ${p.denoise}`, [p.sampler, p.scheduler].filter(Boolean).join(' / '), p.seed != null && `seed ${p.seed}`]
+    .filter(Boolean).join(' · ');
+  let h = `<div class="cv-line">${esc(top)}</div>` + (model ? `<div class="cv-line cv-model">${esc(model)}</div>` : '') + (gen ? `<div class="cv-line">${esc(gen)}</div>` : '');
+  if (m.loras?.length) h += `<div class="cv-label">LoRAs</div>` + m.loras.map(l => `<div>${esc(base(l.name))}${l.strength != null ? ` <span class="cv-muted">× ${l.strength}</span>` : ''}</div>`).join('');
+  const block = (title, arr) => arr?.length ? `<div class="cv-label">${title}<button data-copy="${esc(arr.join('\n\n'))}">Copy</button></div><p class="cv-prompt">${esc(arr.join('\n\n'))}</p>` : '';
+  h += block('Prompt', m.positive) + block('Negative', m.negative);
+  if (m.raw) h += `<div class="cv-label">Parameters</div><p class="cv-prompt">${esc(m.raw)}</p>`;
+  if (!m.positive && !m.raw) h += `<p class="cv-muted">No generation info in this file.</p>`;
+  el.innerHTML = h;
+  el.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => {
+    navigator.clipboard?.writeText(b.dataset.copy); b.textContent = 'Copied';
+  });
+}
+
+// images per row: Auto or a fixed count, remembered in this browser
+const cols = $('#cols');
+for (let n = 1; n <= 10; n++) cols.add(new Option(n + ' per row', n));
+function setCols(v) {
+  cols.value = v;
+  $('#grid').classList.toggle('fixed', v !== 'auto');
+  $('#grid').style.setProperty('--cols', v);
+  try { localStorage.setItem('cols', v); } catch (e) {}
+}
+cols.onchange = () => { setCols(cols.value); layoutCards(); };
+let saved = 'auto';
+try { saved = localStorage.getItem('cols') || 'auto'; } catch (e) {}
+setCols(saved);
+
+// The URL keeps folder, filter and the open image, so a reload comes back to the same view.
+function saveUrl(img) {
+  const p = new URLSearchParams();
+  if (state.folder !== null) p.set('folder', state.folder);
+  if (state.q) p.set('q', state.q);
+  if (state.model) p.set('model', state.model);
+  if (state.lora) p.set('lora', state.lora);
+  if (state.by) p.set('by', state.by);
+  if (state.by && state.group !== null) p.set('group', state.group);
+  if (img) p.set('img', img);
+  history.replaceState(null, '', location.pathname + (p.toString() ? '?' + p : ''));
+  try { localStorage.setItem('view', p.toString()); } catch (e) {}
+}
+
+async function restore() {
+  // a plain address (e.g. the ComfyUI sidebar after a reload) falls back to the last view in this browser
+  let saved = '';
+  try { saved = localStorage.getItem('view') || ''; } catch (e) {}
+  if (!location.search && saved) history.replaceState(null, '', location.pathname + '?' + saved);
+  const p = new URLSearchParams(location.search);
+  try { localStorage.setItem('view', p.toString()); } catch (e) {}
+  if (p.has('folder')) state.folder = p.get('folder');
+  state.q = $('#q').value = p.get('q') || '';
+  state.model = p.get('model') || '';
+  state.lora = p.get('lora') || '';
+  state.by = $('#by').value = p.get('by') || '';
+  state.group = p.get('group');
+  const img = p.get('img');
+  if (!img) return load(true);
+  const r = await (await fetch('api/images?' + params({ limit: 0, find: img }))).json();
+  await load(true, r.at == null ? 120 : r.at + 120);
+  if (r.at != null) openViewer(r.at);
+  else saveUrl();
+}
+
+// inside ComfyUI (side panel or full-screen layer) a close button hands control back to ComfyUI
+if (window.parent !== window) {
+  $('#embed-close').hidden = false;
+  $('#embed-close').onclick = () => window.parent.postMessage({ type: 'gallery-close' }, '*');
+}
+
+restore();
+</script>
+</body>
+</html>

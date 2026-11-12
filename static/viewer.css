@@ -1,0 +1,63 @@
+/* Shared full-screen carousel viewer (comfy-gallery + LoRA showcase boards). */
+.cv { position:fixed; inset:0; z-index:1000; overflow:hidden; background:#000; display:none; flex-direction:column; color:#fff;
+  font:15px/1.4 -apple-system, system-ui, sans-serif; touch-action:pinch-zoom; }
+.cv.open { display:flex; }
+.cv-stage { flex:1; min-height:0; position:relative; overflow:hidden; transition:padding-bottom .25s ease; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.cv-viewport { flex:1; min-height:0; width:100%; overflow:hidden; }
+.cv-track { display:flex; width:300%; height:100%; transform:translate3d(-33.3333%, 0, 0); will-change:transform; }
+.cv-slide { width:33.3333%; height:100%; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+/* the whole image always fits the frame: full width when its shape allows, otherwise full height */
+.cv-slide img { width:100%; height:100%; object-fit:contain; cursor:zoom-in; user-select:none; -webkit-user-drag:none; }
+.cv-cap { margin:0; padding:6px 12px calc(8px + env(safe-area-inset-bottom)); font-size:13px; text-align:center; opacity:.85; font-variant-numeric:tabular-nums; }
+.cv-top { position:absolute; top:0; left:0; right:0; z-index:2; display:flex; justify-content:space-between; align-items:center; gap:8px;
+  padding:calc(10px + env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 10px max(12px, env(safe-area-inset-left));
+  background:linear-gradient(rgba(0,0,0,.6), transparent); }
+.cv-pos { font-size:13px; opacity:.8; font-variant-numeric:tabular-nums; }
+.cv-btn { background:rgba(255,255,255,.15); color:#fff; border:0; border-radius:999px; padding:8px 14px; font:inherit; font-size:14px; text-decoration:none; cursor:pointer; }
+.cv-btn:focus-visible, .cv-nav:focus-visible { outline:2px solid #fff; outline-offset:2px; }
+.cv-actions { display:flex; gap:8px; }
+.cv-nav { position:absolute; top:50%; transform:translateY(-50%); z-index:2; border:0; border-radius:999px; width:44px; height:44px;
+  display:grid; place-items:center; background:rgba(0,0,0,.45); color:#fff; font:600 26px/1 system-ui, sans-serif; cursor:pointer; }
+@media (hover:hover) { .cv-nav { width:48px; height:48px; background:rgba(255,255,255,.14); } .cv-nav:hover { background:rgba(255,255,255,.26); } }
+.cv-prev { left:max(10px, env(safe-area-inset-left)); }
+.cv-next { right:max(10px, env(safe-area-inset-right)); }
+
+/* Optional details panel: bottom sheet on phones, side panel on wide screens. */
+.cv-details { --cv-bg:rgba(255,255,255,.82); --cv-fg:#1b1b1b; --cv-muted:#6b6b6b; --cv-chip:#ececea; --cv-accent:#c4501b;
+  background:var(--cv-bg); color:var(--cv-fg); font-size:13px; height:15vh; display:flex; flex-direction:column;
+  border-radius:14px 14px 0 0; }
+/* On phones the panel floats over the image, so changing its height never resizes the image.
+   The image area only reserves room for the short panel. */
+@media (max-width:899px) {
+  .cv-details { position:absolute; left:0; right:0; bottom:0; z-index:3; max-height:100%; -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); }
+  .cv.has-details:not(.nodetails) .cv-stage { padding-bottom:15vh; }
+
+}
+.cv-details[hidden] { display:none; }
+.cv-handle { flex:none; height:22px; cursor:ns-resize; display:grid; place-items:center; touch-action:none; }
+.cv-handle::before { content:""; width:36px; height:4px; border-radius:2px; background:var(--cv-muted); opacity:.6; }
+.cv-body { flex:1; min-height:0; overflow-y:auto; padding-bottom:calc(14px + env(safe-area-inset-bottom)); }
+/* no side padding on the panel; text lines up with the text inside the prompt boxes */
+.cv-body > :not(.cv-prompt) { padding-left:10px; padding-right:10px; }
+@media (prefers-color-scheme: dark) { .cv-details { --cv-bg:rgba(26,26,26,.82); --cv-fg:#eee; --cv-muted:#999; --cv-chip:#242424; --cv-accent:#ff8a50; } }
+/* the panel slides away instead of disappearing: down on phones, right on wide screens */
+.cv-details { transition:transform .25s ease, margin-right .25s ease; }
+.cv.nodetails .cv-details { transform:translateY(100%); pointer-events:none; }
+@media (min-width:900px) { .cv.nodetails .cv-details { transform:none; margin-right:-380px; } }
+@media (min-width:900px) { .cv { flex-direction:row; } .cv-details { --cv-bg:#fff; height:auto !important; width:380px; border-radius:0; padding-top:12px; } .cv-handle { display:none; } }
+.cv-details h2 { font-size:14px; margin:0 0 8px; word-break:break-all; }
+.cv-details dl { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; margin:0 0 12px; font-size:13px; }
+.cv-line { margin-bottom:4px; color:var(--cv-muted); }
+.cv-line.cv-model { color:var(--cv-fg); font-weight:600; word-break:break-word; }
+.cv-details dt { color:var(--cv-muted); }
+.cv-details dd { margin:0; word-break:break-word; }
+.cv-label { color:var(--cv-muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; margin:12px 0 4px; display:flex; justify-content:space-between; }
+.cv-label button { background:none; border:0; color:var(--cv-accent); font:inherit; text-transform:none; letter-spacing:0; cursor:pointer; }
+.cv-prompt { white-space:pre-wrap; font-size:13px; background:var(--cv-chip); padding:8px 10px; border-radius:0; margin:0; }
+.cv-muted { color:var(--cv-muted); }
+@media (min-width:900px) and (prefers-color-scheme: dark) { .cv-details { --cv-bg:#1a1a1a; } }
+.cv.zoomed .cv-slide img { cursor:grab; }
+.cv-unzoom { display:none; }
+.cv.zoomed .cv-unzoom { display:inline-block; }
+.cv-extra { display:contents; }
+.cv-btn svg { width:15px; height:15px; vertical-align:-2px; }
